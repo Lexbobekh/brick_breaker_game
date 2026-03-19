@@ -1,1 +1,1 @@
-# brick-breaker-game
+# brick_breaker_game
