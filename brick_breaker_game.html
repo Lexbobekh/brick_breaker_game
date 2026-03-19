@@ -1,0 +1,189 @@
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+  #game-wrap { font-family: 'Space Mono', monospace; display: flex; flex-direction: column; align-items: center; padding: 1.5rem 0; }
+  #hud { display: flex; gap: 2rem; margin-bottom: 12px; font-size: 13px; color: var(--color-text-secondary); letter-spacing: 0.08em; }
+  #hud span { color: var(--color-text-primary); font-weight: 700; }
+  #game-canvas { border: 0.5px solid var(--color-border-secondary); border-radius: 4px; display: block; cursor: none; }
+  #msg { margin-top: 16px; font-size: 13px; color: var(--color-text-secondary); letter-spacing: 0.05em; min-height: 20px; }
+  #start-btn { margin-top: 14px; padding: 8px 28px; font-family: 'Space Mono', monospace; font-size: 13px; letter-spacing: 0.08em; cursor: pointer; border-radius: var(--border-radius-md); }
+</style>
+<div id="game-wrap">
+  <div id="hud">SCORE <span id="score">0</span> &nbsp;&nbsp; LIVES <span id="lives">3</span> &nbsp;&nbsp; LEVEL <span id="level">1</span></div>
+  <canvas id="game-canvas" width="480" height="400"></canvas>
+  <div id="msg">PRESS SPACE OR CLICK TO LAUNCH</div>
+  <button id="start-btn">NEW GAME</button>
+</div>
+<script>
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+const COLORS = ['#E24B4A','#BA7517','#1D9E75','#378ADD','#D4537E','#7F77DD','#D85A30','#3B6D11'];
+const BRICK_ROWS = 5, BRICK_COLS = 10, BPAD = 4, BTOP = 40;
+const BW = (W - BPAD * (BRICK_COLS + 1)) / BRICK_COLS;
+const BH = 18;
+
+let state, score, lives, level, bricks, ball, paddle, launched, animId, mouseX;
+
+function initBricks(lvl) {
+  let b = [];
+  let rows = Math.min(BRICK_ROWS + lvl - 1, 8);
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < BRICK_COLS; c++)
+      b.push({ x: BPAD + c * (BW + BPAD), y: BTOP + r * (BH + BPAD), w: BW, h: BH, alive: true, color: COLORS[(r + lvl) % COLORS.length], hp: r < 2 ? 1 : 1 });
+  return b;
+}
+
+function newBall() {
+  return { x: W / 2, y: H - 60, r: 7, dx: 0, dy: 0 };
+}
+
+function newPaddle() {
+  return { x: W / 2 - 40, y: H - 30, w: 80, h: 10 };
+}
+
+function init(lvl) {
+  score = 0; lives = 3; level = lvl || 1;
+  bricks = initBricks(level);
+  ball = newBall();
+  paddle = newPaddle();
+  launched = false;
+  state = 'idle';
+  updateHud();
+  render();
+}
+
+function launchBall() {
+  if (launched) return;
+  launched = true;
+  let spd = 4 + level * 0.4;
+  let angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+  ball.dx = spd * Math.cos(angle);
+  ball.dy = spd * Math.sin(angle);
+  state = 'playing';
+  setMsg('');
+}
+
+function updateHud() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('lives').textContent = lives;
+  document.getElementById('level').textContent = level;
+}
+
+function setMsg(t) { document.getElementById('msg').textContent = t; }
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  // bricks
+  for (let b of bricks) {
+    if (!b.alive) continue;
+    ctx.fillStyle = b.color;
+    ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath(); ctx.roundRect(b.x + 2, b.y + 2, b.w - 4, 5, 2); ctx.fill();
+  }
+
+  // paddle
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  ctx.fillStyle = isDark ? '#CECBF6' : '#534AB7';
+  ctx.beginPath(); ctx.roundRect(paddle.x, paddle.y, paddle.w, paddle.h, 5); ctx.fill();
+
+  // ball
+  ctx.fillStyle = isDark ? '#FAC775' : '#BA7517';
+  ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill();
+
+  // ball shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  ctx.beginPath(); ctx.ellipse(ball.x, ball.y + ball.r + 2, ball.r * 0.7, 3, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+function step() {
+  if (state !== 'playing') return;
+
+  // move paddle
+  if (mouseX !== undefined) {
+    paddle.x = Math.max(0, Math.min(W - paddle.w, mouseX - paddle.w / 2));
+  }
+
+  ball.x += ball.dx; ball.y += ball.dy;
+
+  // walls
+  if (ball.x - ball.r < 0) { ball.x = ball.r; ball.dx = Math.abs(ball.dx); }
+  if (ball.x + ball.r > W) { ball.x = W - ball.r; ball.dx = -Math.abs(ball.dx); }
+  if (ball.y - ball.r < 0) { ball.y = ball.r; ball.dy = Math.abs(ball.dy); }
+
+  // paddle collision
+  if (ball.dy > 0 && ball.y + ball.r >= paddle.y && ball.y - ball.r <= paddle.y + paddle.h
+    && ball.x >= paddle.x - ball.r && ball.x <= paddle.x + paddle.w + ball.r) {
+    let rel = (ball.x - (paddle.x + paddle.w / 2)) / (paddle.w / 2);
+    let angle = rel * (Math.PI / 3);
+    let spd = Math.hypot(ball.dx, ball.dy);
+    ball.dx = spd * Math.sin(angle);
+    ball.dy = -Math.abs(spd * Math.cos(angle));
+    ball.y = paddle.y - ball.r;
+  }
+
+  // brick collision
+  for (let b of bricks) {
+    if (!b.alive) continue;
+    let cx = Math.max(b.x, Math.min(ball.x, b.x + b.w));
+    let cy = Math.max(b.y, Math.min(ball.y, b.y + b.h));
+    let dx = ball.x - cx, dy = ball.y - cy;
+    if (dx * dx + dy * dy < ball.r * ball.r) {
+      b.alive = false; score += 10; updateHud();
+      if (Math.abs(dx) > Math.abs(dy)) ball.dx *= -1; else ball.dy *= -1;
+    }
+  }
+
+  // lost ball
+  if (ball.y - ball.r > H) {
+    lives--; updateHud();
+    if (lives <= 0) { state = 'dead'; setMsg('GAME OVER — CLICK NEW GAME'); render(); return; }
+    ball = newBall(); paddle = newPaddle(); launched = false;
+    state = 'idle'; setMsg('PRESS SPACE OR CLICK TO LAUNCH');
+  }
+
+  // level clear
+  if (bricks.every(b => !b.alive)) {
+    level++; updateHud();
+    bricks = initBricks(level);
+    ball = newBall(); paddle = newPaddle(); launched = false;
+    state = 'idle'; setMsg('LEVEL ' + level + ' — PRESS SPACE OR CLICK');
+  }
+
+  render();
+}
+
+function loop() { step(); animId = requestAnimationFrame(loop); }
+
+canvas.addEventListener('mousemove', e => {
+  let rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  if (!launched && state === 'idle') {
+    paddle.x = Math.max(0, Math.min(W - paddle.w, mouseX - paddle.w / 2));
+    ball.x = paddle.x + paddle.w / 2;
+    render();
+  }
+});
+
+canvas.addEventListener('click', () => { if (state === 'idle') launchBall(); });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  let rect = canvas.getBoundingClientRect();
+  mouseX = e.touches[0].clientX - rect.left;
+}, { passive: false });
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  let rect = canvas.getBoundingClientRect();
+  mouseX = e.touches[0].clientX - rect.left;
+  if (state === 'idle') launchBall();
+}, { passive: false });
+
+document.addEventListener('keydown', e => { if (e.code === 'Space' && state === 'idle') { e.preventDefault(); launchBall(); } });
+document.getElementById('start-btn').addEventListener('click', () => { cancelAnimationFrame(animId); init(1); loop(); });
+
+init(1);
+loop();
+</script>
